@@ -288,6 +288,7 @@ SENSOR_DESCRIPTIONS: tuple[SensorEntityDescription, ...] = (
         key=KEY_PRESENT_FLOW,
         translation_key="present_flow",
         native_unit_of_measurement=UnitOfVolumeFlowRate.GALLONS_PER_MINUTE,
+        device_class=SensorDeviceClass.VOLUME_FLOW_RATE,
         state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorEntityDescription(
@@ -345,6 +346,7 @@ SENSOR_DESCRIPTIONS: tuple[SensorEntityDescription, ...] = (
         key=KEY_TOTAL_GALLONS_RESETTABLE,
         translation_key="total_gallons_resettable",
         native_unit_of_measurement=UnitOfVolume.GALLONS,
+        device_class=SensorDeviceClass.WATER,
         state_class=SensorStateClass.TOTAL,
     ),
     # Device list / diagnostic sensors
