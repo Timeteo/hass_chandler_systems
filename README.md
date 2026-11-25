@@ -4,7 +4,7 @@
 
 A [Home Assistant](https://www.home-assistant.io/) custom integration for monitoring [Chandler Systems](https://www.chandlersystemsinc.com/) Signature-series water treatment valves over Bluetooth Low Energy (BLE).
 
-This is a fork of the original integration by [@toekneestuck](https://github.com/toekneestuck), which hasn't received updates since May 2026. It adds fixes for device registration, message decoding and error handling, plus the water and flow device classes so the gallons sensor works with the Energy dashboard's water panel. See the commit history for details.
+This is a fork of the original integration by [@toekneestuck](https://github.com/toekneestuck), whose code hasn't been updated since March 2026. It adds fixes for device registration, message decoding and error handling, plus the water and flow device classes so the gallons sensor works with the Energy dashboard's water panel. See the commit history for details.
 
 ## Features
 
