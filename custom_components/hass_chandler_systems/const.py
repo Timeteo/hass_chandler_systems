@@ -36,8 +36,13 @@ CONF_AUTH_KEY = "auth_key"
 # Startup timeout - seconds to wait for initial data after BLE connection
 DEVICE_STARTUP_TIMEOUT = 30
 
-# Minimum amount of seconds to wait before attempting to connect to the device again
-MIN_POLL_DURATION = 60
+# Seconds between polls (BLE connections) after a successful poll. The valve's
+# BLE stack wedges if it is connected to too often, so keep this generous.
+MIN_POLL_DURATION = 900
+
+# Backoff after failed polls: RETRY_BASE * 2**(failures - 1), capped at RETRY_MAX
+RETRY_BASE = 300
+RETRY_MAX = 3600
 
 # Idle disconnect timeout - seconds with no push data before disconnecting
 IDLE_DISCONNECT_TIMEOUT = 10

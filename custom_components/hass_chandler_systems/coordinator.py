@@ -42,6 +42,8 @@ from .const import (
     IDLE_DISCONNECT_TIMEOUT,
     MAX_CONNECTION_TIMEOUT,
     MIN_POLL_DURATION,
+    RETRY_BASE,
+    RETRY_MAX,
 )
 from .device_info import format_device_info
 
@@ -91,6 +93,13 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
         self._ready_event = asyncio.Event()
         self._data_received_event = asyncio.Event()
         self.last_connection_successful = True
+        self._consecutive_failures = 0
+
+    def _poll_interval(self) -> float:
+        """Seconds to wait before the next poll, backing off after failures."""
+        if self._consecutive_failures == 0:
+            return MIN_POLL_DURATION
+        return min(RETRY_BASE * 2 ** (self._consecutive_failures - 1), RETRY_MAX)
 
     @callback
     def _needs_poll(
@@ -104,7 +113,7 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
             and self._api is None
             and (
                 seconds_since_last_poll is None
-                or seconds_since_last_poll >= MIN_POLL_DURATION
+                or seconds_since_last_poll >= self._poll_interval()
             )
             and bool(
                 bluetooth.async_ble_device_from_address(
@@ -165,11 +174,19 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
                     # data_task completed - loop and wait for more data.
 
             self.last_connection_successful = True
+            self._consecutive_failures = 0
             async_delete_issue(self.hass, DOMAIN, "cannot_connect")
         except ChandlerSystemsAuthenticationError as err:
             raise ConfigEntryAuthFailed(f"Incorrect API key format: {err}") from err
         except ChandlerSystemsConnectionError as err:
             self.last_connection_successful = False
+            self._consecutive_failures += 1
+            _LOGGER.debug(
+                "%s: poll failed (%d in a row), next attempt in %ds",
+                self.address,
+                self._consecutive_failures,
+                self._poll_interval(),
+            )
             self.async_update_listeners()
             async_create_issue(
                 self.hass,
@@ -188,7 +205,7 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
             )
         finally:
             # Always disconnect after reading; _needs_poll will reconnect on
-            # the next advertisement (rate-limited to once every 60 seconds).
+            # the next advertisement (rate-limited by _poll_interval).
             self._api = None
             await api.disconnect()
 
