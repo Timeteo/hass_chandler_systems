@@ -9,7 +9,6 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntityDescription,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import (
@@ -99,11 +98,6 @@ class ChandlerSystemsBinarySensor(ChandlerSystemsEntity, BinarySensorEntity):
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{coordinator.address}-{description.key}"
-
-    @property
-    def device_info(self) -> DeviceInfo | None:
-        """Return device info for the sensor."""
-        return self.coordinator.device_info
 
     @property
     def is_on(self) -> bool | None:

@@ -19,7 +19,7 @@ from bleak.backends.device import BLEDevice
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     HEADER_ACK,
@@ -70,6 +70,10 @@ class ChandlerSystemsAPI:
         self._auth_key: str | None = None
 
         self._receive_buffer = bytearray()
+        # True while a multi-packet message is being reassembled
+        self._receiving = False
+        # Serializes inbound packet processing so chunks are reassembled in order
+        self._rx_lock = asyncio.Lock()
         self._response_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
         self._ack_event = asyncio.Event()
@@ -205,7 +209,7 @@ class ChandlerSystemsAPI:
                         f"Invalid auth key length, expected 16, got {len(token_bytes)} bytes"
                     )
 
-                _LOGGER.debug("Sending Auth Token: %s", token_bytes.hex())
+                _LOGGER.debug("Sending auth token")
                 self._drain_response_queue()
                 await self._write_gatt(token_bytes, lock=False)
 
@@ -220,20 +224,18 @@ class ChandlerSystemsAPI:
                     _LOGGER.debug("Received Auth Response: %s", auth_response)
 
                     # Check for failure: {"as": 2} means authorized
-                    if auth_response.get("as") != 2:
-                        _LOGGER.error(
-                            "Authentication failed: Device reported unauthorized"
-                        )
-                        raise ConfigEntryAuthFailed("API key was rejected by device")
+                except TimeoutError as err:
+                    raise ChandlerSystemsConnectionError(
+                        "Timeout waiting for auth response"
+                    ) from err
 
-                    _LOGGER.info(
-                        "Authentication successful for device %s", self.address
+                if auth_response.get("as") != 2:
+                    raise ChandlerSystemsAuthenticationError(
+                        translation_key="invalid_auth"
                     )
-                except TimeoutError:
-                    _LOGGER.warning("Timeout waiting for Auth Response")
-                    return False
-                else:
-                    return True
+
+                _LOGGER.info("Authentication successful for device %s", self.address)
+                return True
             except BleakError as err:
                 _LOGGER.error("Bluetooth error during authentication: %s", err)
                 raise
@@ -260,10 +262,6 @@ class ChandlerSystemsAPI:
     def register_callback(self, fn: Callable[[dict[str, Any]], None]) -> None:
         """Register a callback for notifications."""
         self._callbacks.append(fn)
-
-    def unregister_callback(self, fn: Callable[[dict[str, Any]], None]) -> None:
-        """Unregister a previously registered callback."""
-        self._callbacks.remove(fn)
 
     def _drain_response_queue(self) -> None:
         """Discard any stale responses sitting in the queue."""
@@ -338,7 +336,7 @@ class ChandlerSystemsAPI:
 
         # Calculate CRC
         crc = self._calculate_crc16(packet)
-        packet.extend(crc.to_bytes(2, "big"))
+        packet.extend(crc.to_bytes(2, "little"))
 
         # Send (serialized by write lock inside _write_gatt)
         _LOGGER.debug(
@@ -370,9 +368,10 @@ class ChandlerSystemsAPI:
     async def _async_handle_notification(self, data: bytearray) -> None:
         """Process an incoming BLE notification."""
         try:
-            await self._handle_packet(data)
-        except BleakError as err:
-            _LOGGER.error("Error handling packet: %s", err)
+            async with self._rx_lock:
+                await self._handle_packet(data)
+        except (BleakError, ChandlerSystemsConnectionError) as err:
+            _LOGGER.debug("Error handling packet from %s: %s", self.address, err)
 
     async def _handle_packet(self, data: bytearray) -> None:
         """Handle a received packet.
@@ -432,22 +431,40 @@ class ChandlerSystemsAPI:
         is_last = (header & HEADER_LAST_PACKET) != 0
 
         if is_first:
+            if self._receiving:
+                _LOGGER.debug(
+                    "[receive_handler] new message started before previous one "
+                    "finished; dropping %d buffered bytes",
+                    len(self._receive_buffer),
+                )
             self._receive_buffer.clear()
+            self._receiving = True
+        elif not self._receiving:
+            # Continuation chunk with no first chunk (e.g. we connected
+            # mid-message). Can't be reassembled; ACK it and move on.
+            _LOGGER.debug("[receive_handler] dropping orphan continuation chunk")
+            await self._send_status_packet(HEADER_ACK)
+            return
 
         self._receive_buffer.extend(payload)
 
         json_data = None
         if is_last:
+            raw = bytes(self._receive_buffer)
+            self._receive_buffer.clear()
+            self._receiving = False
             try:
-                json_str = self._receive_buffer.decode("utf-8")
-                _LOGGER.debug("[receive_handler] decoded JSON: %s", json_str)
-                json_data = json.loads(json_str)
-
+                json_data = json.loads(raw.rstrip(b"\x00").decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as err:
+                _LOGGER.warning(
+                    "[receive_handler] Failed to decode %d-byte message: %s",
+                    len(raw),
+                    err,
+                )
+                _LOGGER.debug("[receive_handler] undecodable message: %r", raw)
+            else:
+                _LOGGER.debug("[receive_handler] decoded JSON: %s", json_data)
                 self._response_queue.put_nowait(json_data)
-            except json.JSONDecodeError:
-                _LOGGER.error("[receive_handler] Failed to decode JSON response")
-            finally:
-                self._receive_buffer.clear()
 
         # Send ACK before notifying callbacks so the device gets a timely
         # acknowledgement and any commands triggered by callbacks are
@@ -513,8 +530,8 @@ class ChandlerSystemsAPI:
         try:
             await self._write_gatt(bytes([status]))
         except (ChandlerSystemsConnectionError, BleakError) as err:
-            _LOGGER.error("Failed to send status packet 0x%02X: %s", status, err)
-            raise
+            # Typically a notification racing a disconnect; nothing to recover.
+            _LOGGER.debug("Failed to send status packet 0x%02X: %s", status, err)
 
     @callback
     def _on_ble_disconnect(self, _client: BleakClientWithServiceCache) -> None:

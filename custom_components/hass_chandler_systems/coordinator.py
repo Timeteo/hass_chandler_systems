@@ -21,7 +21,8 @@ from homeassistant.components.bluetooth.active_update_coordinator import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CoreState, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
 from homeassistant.helpers.issue_registry import (
     IssueSeverity,
     async_create_issue,
@@ -76,7 +77,15 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
         )
         self.auth_key = auth_key
         self.config_entry = config_entry
-        self.device_info: DeviceInfo | None = None
+        # Base device, available from the start so HA always registers a
+        # device; model/serial/firmware are merged in when they arrive.
+        self.device_info = DeviceInfo(
+            identifiers={(DOMAIN, address)},
+            connections={(CONNECTION_BLUETOOTH, address)},
+            manufacturer="Chandler Systems",
+            name="Chandler Systems",
+        )
+        self._device_details: DeviceInfo | None = None
         self.ble_device: BLEDevice | None = None
         self._api: ChandlerSystemsAPI | None = None
         self._ready_event = asyncio.Event()
@@ -198,7 +207,15 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
         self.async_update_listeners()
 
     def _set_device_info(self, data: dict[str, Any]) -> None:
-        self.device_info = format_device_info(data)
+        """Merge device details into the device info and the device registry."""
+        details = format_device_info(data)
+        if details is None or details == self._device_details:
+            return
+        self._device_details = details
+        self.device_info = DeviceInfo(**{**self.device_info, **details})
+        dr.async_get(self.hass).async_get_or_create(
+            config_entry_id=self.config_entry.entry_id, **self.device_info
+        )
 
     async def _async_sync_time(
         self, api: ChandlerSystemsAPI, payload: dict[str, Any]
@@ -221,10 +238,9 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
 
         now = dt_util.now()
         # The device only reports hours and minutes, so we consider it "in sync"
-        # if the time is within one minute (plus or minus) of local time.
-        if data["dh"] == now.hour and (
-            data["dm"] in [now.minute, now.minute - 1, now.minute + 1]
-        ):
+        # if it is within one minute of local time (wrapping at midnight).
+        drift = abs((data["dh"] * 60 + data["dm"]) - (now.hour * 60 + now.minute))
+        if min(drift, 1440 - drift) <= 1:
             _LOGGER.debug("Device time is in sync; no time sync needed")
             return
 

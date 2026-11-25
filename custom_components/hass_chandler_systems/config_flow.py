@@ -137,7 +137,7 @@ class ChandlerSystemsConfigFlow(ConfigFlow, domain=DOMAIN):
         except ChandlerSystemsAuthenticationError as err:
             errors["base"] = err.translation_key or "invalid_auth"
         except FlowError as err:
-            errors["base"] = err.translation_key or "connection_failed"
+            errors["base"] = err.translation_key or "cannot_connect"
 
         if errors:
             return self.async_show_form(

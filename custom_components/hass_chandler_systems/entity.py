@@ -6,6 +6,7 @@ from homeassistant.components.bluetooth.passive_update_coordinator import (
     PassiveBluetoothCoordinatorEntity,
 )
 from homeassistant.core import callback
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .coordinator import ChandlerSystemsCoordinator
 
@@ -17,9 +18,10 @@ class ChandlerSystemsEntity(
 
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator: ChandlerSystemsCoordinator) -> None:
-        """Initialize the entity."""
-        super().__init__(coordinator)
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info for the entity."""
+        return self.coordinator.device_info
 
     @property
     def available(self) -> bool:

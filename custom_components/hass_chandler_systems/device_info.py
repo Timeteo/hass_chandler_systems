@@ -8,7 +8,6 @@ from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import (
     AERATION_ONLY_KEYS,
-    DOMAIN,
     KEY_FIRMWARE_VERSION,
     KEY_SERIAL_A,
     KEY_SERIAL_B,
@@ -26,9 +25,10 @@ def format_firmware_version(dlf: int) -> str:
 
 
 def format_device_info(device_data: dict[str, Any]) -> DeviceInfo | None:
-    """Return basic device info.
+    """Return device details parsed from the device-list data.
 
-    This is used to populate the config flow's device info and the coordinator's data.
+    Contains no identifiers: the coordinator keys the device on its Bluetooth
+    address and merges these details in once they arrive.
     """
     raw_type = device_data.get(KEY_VALVE_TYPE)
     raw_series = device_data.get(KEY_VALVE_SERIES)
@@ -55,7 +55,6 @@ def format_device_info(device_data: dict[str, Any]) -> DeviceInfo | None:
 
         return DeviceInfo(
             {
-                "identifiers": {(DOMAIN, serial)},
                 "serial_number": serial,
                 "manufacturer": "Chandler Systems",
                 "model": valve_type,

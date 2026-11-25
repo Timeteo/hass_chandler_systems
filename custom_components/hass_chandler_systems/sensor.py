@@ -8,7 +8,6 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
@@ -61,11 +60,6 @@ class ChandlerSystemsSensor(ChandlerSystemsEntity, SensorEntity):
                     self._attr_last_reset = dt_util.utcnow()
                 self._previous_value = current_value
         super()._handle_coordinator_update()
-
-    @property
-    def device_info(self) -> DeviceInfo | None:
-        """Return device info for the sensor."""
-        return self.coordinator.device_info
 
     @property
     def native_value(self) -> StateType:
