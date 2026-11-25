@@ -72,8 +72,6 @@ class ChandlerSystemsAPI:
         self._receive_buffer = bytearray()
         # True while a multi-packet message is being reassembled
         self._receiving = False
-        # Serializes inbound packet processing so chunks are reassembled in order
-        self._rx_lock = asyncio.Lock()
         self._response_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
         self._ack_event = asyncio.Event()
@@ -368,8 +366,7 @@ class ChandlerSystemsAPI:
     async def _async_handle_notification(self, data: bytearray) -> None:
         """Process an incoming BLE notification."""
         try:
-            async with self._rx_lock:
-                await self._handle_packet(data)
+            await self._handle_packet(data)
         except (BleakError, ChandlerSystemsConnectionError) as err:
             _LOGGER.debug("Error handling packet from %s: %s", self.address, err)
 
