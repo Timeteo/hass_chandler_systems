@@ -118,7 +118,7 @@ You lose the old entities' history, and entity IDs will gain a device prefix bec
 
 - **Device not discovered**: Ensure your Bluetooth adapter is working and the device is powered on and within range. ESPHome Bluetooth proxies can extend range.
 - **Authentication failed**: Verify your API key is correct. It should be a UUID (32 hex characters, with or without dashes).
-- **Frequent disconnections**: The integration connects on a polling interval, exchanges data, then disconnects. This is normal. It reconnects on the next advertisement.
+- **Frequent disconnections**: The integration disconnects after 10 seconds without data. This is normal. It reconnects on the next advertisement.
 - **Missing sensors**: Some sensors only appear for specific device types. Softener-specific sensors (salt, hardness, brine) won't appear for filter-only devices.
 
 ## Contributing
