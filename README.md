@@ -2,16 +2,18 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 
-A [Home Assistant](https://www.home-assistant.io/) custom component for monitoring and controlling [Chandler Systems](https://www.chandlersystemsinc.com/) Signature-series water treatment devices over Bluetooth Low Energy (BLE).
+A [Home Assistant](https://www.home-assistant.io/) custom integration for monitoring [Chandler Systems](https://www.chandlersystemsinc.com/) Signature-series water treatment valves over Bluetooth Low Energy (BLE).
+
+This is a fork of the original integration by [@toekneestuck](https://github.com/toekneestuck), which is no longer maintained. It adds fixes for device registration, message decoding and error handling, plus the water and flow device classes so the gallons sensor works with the Energy dashboard's water panel. See the commit history for details.
 
 ## Features
 
-- **Fully local** — no cloud dependency; communicates directly with your device over BLE
-- **Auto-discovery** — devices are automatically detected via BLE advertisements
-- **Active polling** — establishes an active Bluetooth connection on a polling interval to send and receive data from the device
-- **40+ sensors** — battery level, flow rates, water usage, regeneration status, salt levels, diagnostics, and more
-- **7 binary sensors** — regeneration state, motor status, aeration mode, and others
-- **Device-type aware** — entities are dynamically filtered based on your device type (softener, aeration filter, etc.)
+- Fully local. No cloud; it talks to the valve directly over BLE.
+- Auto-discovery from BLE advertisements.
+- Connects when the valve advertises (at most once a minute), stays connected while the valve pushes data, then disconnects after 10 seconds of silence.
+- 40+ sensors: battery, flow, water usage, regeneration status, salt level, diagnostics.
+- 7 binary sensors: regeneration, motor, aeration mode and a few others.
+- Only creates entities that apply to your valve type (softener, aeration filter, etc.).
 
 ## Supported Devices
 
@@ -22,7 +24,7 @@ Chandler Systems Signature-series water treatment devices, including:
 - Aeration filters
 - HydroxR, ReactR, and Ultra filters
 
-Across valve series 2–6 (D12, D15, CS125, CS150, CS121).
+Across valve series 2-6 (D12, D15, CS125, CS150, CS121).
 
 ## Requirements
 
@@ -36,20 +38,31 @@ Across valve series 2–6 (D12, D15, CS125, CS150, CS121).
 
 1. Open HACS in Home Assistant
 2. Click the three-dot menu in the top right and select **Custom repositories**
-3. Add this repository URL and select **Integration** as the category
+3. Add `https://github.com/Timeteo/hass_chandler_systems` and pick **Integration** as the category
 4. Search for **Chandler Systems** and install it
 5. Restart Home Assistant
 
 ### Manual
 
-1. Copy the `custom_components/hass_chandler_systems` directory into your Home Assistant `config/custom_components/` directory
+1. Copy `custom_components/hass_chandler_systems` to `config/custom_components/chandler_systems` (the folder name must match the domain)
 2. Restart Home Assistant
+
+### Switching from the original integration
+
+HACS won't uninstall a repository while its integration is configured, so:
+
+1. Delete the Chandler Systems integration under **Settings > Devices & Services**
+2. Uninstall the original in HACS and remove it from your custom repositories
+3. Add this repository and install it as above, then restart
+4. Set the integration up again with your API key
+
+You lose the old entities' history, and entity IDs will gain a device prefix because a device is now created.
 
 ## Configuration
 
 1. Ensure Bluetooth is available in Home Assistant
-2. Your device should be auto-discovered — look for a notification in **Settings > Devices & Services**
-3. If not auto-discovered, click **Add Integration**, search for **Chandler Systems**, and enter your device's Bluetooth address manually
+2. Your device should be auto-discovered. Look for a notification in **Settings > Devices & Services**
+3. If not auto-discovered, click **Add Integration**, search for **Chandler Systems**, and enter the Bluetooth address by hand
 4. Enter your API key when prompted
 5. The integration will connect, authenticate, and begin receiving data
 
@@ -73,9 +86,9 @@ Across valve series 2–6 (D12, D15, CS125, CS150, CS121).
 | Sensor | Unit | Description |
 |--------|------|-------------|
 | Present Flow | GPM | Current water flow rate |
-| Valve Status | — | Current valve position |
-| Regeneration State | — | Current regeneration phase (idle, backwash, brine draw, etc.) |
-| Valve Error | — | Error state if any (lost home, encoder error, motor timeout, etc.) |
+| Valve Status | | Current valve position |
+| Regeneration State | | Current regeneration phase (idle, backwash, brine draw, etc.) |
+| Valve Error | | Error state if any (lost home, encoder error, motor timeout, etc.) |
 
 ### History & Diagnostics
 
@@ -84,10 +97,10 @@ Across valve series 2–6 (D12, D15, CS125, CS150, CS121).
 | Days in Operation | days | Total days the device has been running |
 | Days Since Regeneration | days | Days since last regeneration cycle |
 | Gallons Since Regeneration | gal | Water used since last regeneration |
-| Regeneration Counter | — | Total regeneration cycles |
+| Regeneration Counter | | Total regeneration cycles |
 | Total Gallons | gal | Lifetime water usage |
-| Serial Number | — | Device serial number |
-| Firmware Version | — | Current firmware version |
+| Serial Number | | Device serial number |
+| Firmware Version | | Current firmware version |
 
 ### Binary Sensors
 
@@ -105,12 +118,12 @@ Across valve series 2–6 (D12, D15, CS125, CS150, CS121).
 
 - **Device not discovered**: Ensure your Bluetooth adapter is working and the device is powered on and within range. ESPHome Bluetooth proxies can extend range.
 - **Authentication failed**: Verify your API key is correct. It should be a UUID (32 hex characters, with or without dashes).
-- **Frequent disconnections**: The integration connects on a polling interval, exchanges data, then disconnects. This is normal behavior — it will reconnect automatically on the next poll cycle.
+- **Frequent disconnections**: The integration connects on a polling interval, exchanges data, then disconnects. This is normal. It reconnects on the next advertisement.
 - **Missing sensors**: Some sensors only appear for specific device types. Softener-specific sensors (salt, hardness, brine) won't appear for filter-only devices.
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or pull request on [GitHub](https://github.com/toekneestuck/hass_chandler_systems).
+Issues and pull requests are welcome on [GitHub](https://github.com/Timeteo/hass_chandler_systems/issues).
 
 ## License
 

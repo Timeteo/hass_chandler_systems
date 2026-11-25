@@ -151,7 +151,7 @@ class ChandlerSystemsAPI:
     async def identify(self, lock: bool = True) -> dict[str, Any]:
         """Send the ID packet and return the device's initial data response.
 
-        Performs only the first half of the auth handshake — sends the ID status
+        Performs only the first half of the auth handshake - sends the ID status
         packet (0xEA), waits for the ACK, then waits for the initial data packet
         that contains device metadata (valve type, series, firmware version, serial
         numbers). The auth token is NOT sent, so no credentials are required.

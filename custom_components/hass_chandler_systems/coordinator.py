@@ -160,9 +160,9 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
                         )
                         break
                     if not done:
-                        # Idle timeout — no data and no disconnect signal.
+                        # Idle timeout - no data and no disconnect signal.
                         break
-                    # data_task completed — loop and wait for more data.
+                    # data_task completed - loop and wait for more data.
 
             self.last_connection_successful = True
             async_delete_issue(self.hass, DOMAIN, "cannot_connect")
@@ -252,7 +252,7 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
             now.minute,
             now.second,
         )
-        # Capture self._api now — by the time the background task runs,
+        # Capture self._api now - by the time the background task runs,
         # the coordinator's finally block may have set self._api to None.
         self.hass.async_create_background_task(
             self._async_sync_time(
