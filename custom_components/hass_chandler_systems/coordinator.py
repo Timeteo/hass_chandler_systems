@@ -95,6 +95,9 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
         self.last_connection_successful = True
         self._consecutive_failures = 0
         self._session_task: asyncio.Task[None] | None = None
+        # Loop time the last session ended or failed; reconnect delay counts
+        # from here, not from when the (possibly hours-long) session started.
+        self._last_session_end: float | None = None
 
     @property
     def connected(self) -> bool:
@@ -118,8 +121,9 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
             self.hass.state is CoreState.running
             and self._api is None
             and (
-                seconds_since_last_poll is None
-                or seconds_since_last_poll >= self._poll_interval()
+                self._last_session_end is None
+                or self.hass.loop.time() - self._last_session_end
+                >= self._poll_interval()
             )
             and bool(
                 bluetooth.async_ble_device_from_address(
@@ -197,7 +201,8 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
                 self._api = None
             await api.disconnect()
 
-        lasted = self.hass.loop.time() - started
+        self._last_session_end = self.hass.loop.time()
+        lasted = self._last_session_end - started
         _LOGGER.debug("%s: session lasted %ds", self.address, int(lasted))
         if lasted >= SESSION_STABLE_AFTER:
             self._consecutive_failures = 0
@@ -209,6 +214,7 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
 
     def _record_failure(self) -> None:
         """Count a failed or short-lived session and raise an issue if stuck."""
+        self._last_session_end = self.hass.loop.time()
         self.last_connection_successful = False
         self._consecutive_failures += 1
         _LOGGER.debug(

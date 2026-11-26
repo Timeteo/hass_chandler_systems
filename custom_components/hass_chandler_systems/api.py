@@ -360,6 +360,10 @@ class ChandlerSystemsAPI:
         self, _characteristic: BleakGATTCharacteristic, data: bytearray
     ) -> None:
         """Handle incoming notifications by scheduling async processing."""
+        if not self._connected:
+            # A previous session's subscription can outlive it on a reused
+            # BlueZ client; ignore its notifications.
+            return
         self.last_rx = self.hass.loop.time()
         self.hass.async_create_background_task(
             self._async_handle_notification(data),

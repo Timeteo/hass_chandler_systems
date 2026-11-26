@@ -1,7 +1,7 @@
 {
   "domain": "chandler_systems",
   "name": "Chandler Systems",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "bluetooth": [
     {
       "connectable": true,
