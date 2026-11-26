@@ -78,6 +78,8 @@ class ChandlerSystemsAPI:
         self._nack_event = asyncio.Event()
         self._write_lock = asyncio.Lock()
         self.disconnect_event: asyncio.Event = asyncio.Event()
+        # Loop time of the last notification from the device (watchdog)
+        self.last_rx: float = hass.loop.time()
 
     async def connect(self, ble_device: BLEDevice) -> bool:
         """Connect to the Chandler Systems device."""
@@ -138,8 +140,8 @@ class ChandlerSystemsAPI:
                     # Connection already dropped; skip the reset and proceed to cleanup.
                     _LOGGER.debug("Device already disconnected, skipping reset command")
                 self._connected = False
-                # Short delay to allow it to process the disconnect
-                await asyncio.sleep(0.1)
+                # Delay recommended by the Signature API guide
+                await asyncio.sleep(0.15)
                 # disconnect the client
                 await self.client.disconnect()
                 _LOGGER.info(
@@ -358,6 +360,7 @@ class ChandlerSystemsAPI:
         self, _characteristic: BleakGATTCharacteristic, data: bytearray
     ) -> None:
         """Handle incoming notifications by scheduling async processing."""
+        self.last_rx = self.hass.loop.time()
         self.hass.async_create_background_task(
             self._async_handle_notification(data),
             f"chandler_systems_notify_{self.address}",

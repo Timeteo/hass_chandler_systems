@@ -36,19 +36,24 @@ CONF_AUTH_KEY = "auth_key"
 # Startup timeout - seconds to wait for initial data after BLE connection
 DEVICE_STARTUP_TIMEOUT = 30
 
-# Seconds between polls (BLE connections) after a successful poll. The valve's
-# BLE stack wedges if it is connected to too often, so keep this generous.
-MIN_POLL_DURATION = 900
+# The valve's BLE stack wedges after ~10-15 connect/disconnect cycles, so the
+# integration holds one session open and only reconnects when it drops.
 
-# Backoff after failed polls: RETRY_BASE * 2**(failures - 1), capped at RETRY_MAX
+# Seconds to wait before reconnecting after a healthy session drops
+RECONNECT_DELAY = 60
+
+# A session must last this long to count as healthy (resets the backoff)
+SESSION_STABLE_AFTER = 600
+
+# Backoff after failed sessions: RETRY_BASE * 2**(failures - 1), capped at RETRY_MAX
 RETRY_BASE = 300
 RETRY_MAX = 3600
 
-# Idle disconnect timeout - seconds with no push data before disconnecting
-IDLE_DISCONNECT_TIMEOUT = 10
+# Raise the "cannot connect" repair issue after this many failures in a row
+ISSUE_AFTER_FAILURES = 3
 
-# Maximum connection duration - absolute cap on how long a poll connection stays open
-MAX_CONNECTION_TIMEOUT = 3600
+# Drop the session if nothing (data or MARCO) arrives for this many seconds
+SILENCE_TIMEOUT = 120
 
 # API access key:
 #   W = Write-Only (device pushes to app, read-only from HA's perspective)

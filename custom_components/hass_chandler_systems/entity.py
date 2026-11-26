@@ -26,6 +26,8 @@ class ChandlerSystemsEntity(
     @property
     def available(self) -> bool:
         """Return True if the entity is available."""
+        if self.coordinator.connected:
+            return True
         return super().available and self.coordinator.last_connection_successful
 
     @callback

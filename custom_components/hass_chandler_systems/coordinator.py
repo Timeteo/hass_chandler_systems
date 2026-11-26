@@ -39,11 +39,12 @@ from .api import (
 from .const import (
     DEVICE_STARTUP_TIMEOUT,
     DOMAIN,
-    IDLE_DISCONNECT_TIMEOUT,
-    MAX_CONNECTION_TIMEOUT,
-    MIN_POLL_DURATION,
+    ISSUE_AFTER_FAILURES,
+    RECONNECT_DELAY,
     RETRY_BASE,
     RETRY_MAX,
+    SESSION_STABLE_AFTER,
+    SILENCE_TIMEOUT,
 )
 from .device_info import format_device_info
 
@@ -91,14 +92,19 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
         self.ble_device: BLEDevice | None = None
         self._api: ChandlerSystemsAPI | None = None
         self._ready_event = asyncio.Event()
-        self._data_received_event = asyncio.Event()
         self.last_connection_successful = True
         self._consecutive_failures = 0
+        self._session_task: asyncio.Task[None] | None = None
+
+    @property
+    def connected(self) -> bool:
+        """Return True while a persistent session to the device is up."""
+        return self._api is not None and self._api.connected
 
     def _poll_interval(self) -> float:
         """Seconds to wait before the next poll, backing off after failures."""
         if self._consecutive_failures == 0:
-            return MIN_POLL_DURATION
+            return RECONNECT_DELAY
         return min(RETRY_BASE * 2 ** (self._consecutive_failures - 1), RETRY_MAX)
 
     @callback
@@ -125,7 +131,14 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
     async def _async_update(
         self, service_info: BluetoothServiceInfoBleak
     ) -> dict[str, Any]:
-        """Connect, authenticate, and request initial data from the device."""
+        """Open a persistent, authenticated session to the device.
+
+        The valve's BLE stack leaks something on every connect/disconnect
+        cycle and wedges after roughly 10-15 of them, so the session is kept
+        open indefinitely. The device pushes data and MARCO keep-alives over
+        it; a background task holds it and cleans up when it drops.
+        _needs_poll only asks for a new session once this one is gone.
+        """
         self.ble_device = service_info.device
 
         # Tear down any stale connection before creating a new one
@@ -141,53 +154,71 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
         try:
             await api.connect(service_info.device)
             await api.authenticate(self.auth_key)
-            # Stay connected while data keeps arriving.
-            # Disconnect after IDLE_DISCONNECT_TIMEOUT seconds of silence,
-            # or after MAX_CONNECTION_TIMEOUT seconds total (safety cap),
-            # or immediately if the BLE connection drops.
-            async with asyncio.timeout(MAX_CONNECTION_TIMEOUT):
-                while True:
-                    self._data_received_event.clear()
-                    data_task = self.hass.async_create_task(
-                        self._data_received_event.wait(), eager_start=True
-                    )
-                    disconnect_task = self.hass.async_create_task(
-                        api.disconnect_event.wait(), eager_start=True
-                    )
-                    done, pending = await asyncio.wait(
-                        {data_task, disconnect_task},
-                        timeout=IDLE_DISCONNECT_TIMEOUT,
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    for task in pending:
-                        task.cancel()
-
-                    if disconnect_task in done:
-                        _LOGGER.info(
-                            "BLE connection to %s dropped, exiting wait loop",
-                            self.address,
-                        )
-                        break
-                    if not done:
-                        # Idle timeout - no data and no disconnect signal.
-                        break
-                    # data_task completed - loop and wait for more data.
-
-            self.last_connection_successful = True
-            self._consecutive_failures = 0
-            async_delete_issue(self.hass, DOMAIN, "cannot_connect")
         except ChandlerSystemsAuthenticationError as err:
+            self._api = None
+            await api.disconnect()
             raise ConfigEntryAuthFailed(f"Incorrect API key format: {err}") from err
         except ChandlerSystemsConnectionError as err:
-            self.last_connection_successful = False
-            self._consecutive_failures += 1
-            _LOGGER.debug(
-                "%s: poll failed (%d in a row), next attempt in %ds",
-                self.address,
-                self._consecutive_failures,
-                self._poll_interval(),
-            )
-            self.async_update_listeners()
+            self._api = None
+            await api.disconnect()
+            self._record_failure()
+            raise UpdateFailed(f"Failed to connect to {self.address}: {err}") from err
+
+        self.last_connection_successful = True
+        self.async_update_listeners()
+        self._session_task = self.hass.async_create_background_task(
+            self._async_hold_session(api),
+            f"{DOMAIN}_session_{self.address}",
+        )
+        return self.data or {}
+
+    async def _async_hold_session(self, api: ChandlerSystemsAPI) -> None:
+        """Keep the session open until the link drops or goes silent."""
+        started = self.hass.loop.time()
+        try:
+            while True:
+                try:
+                    async with asyncio.timeout(SILENCE_TIMEOUT / 4):
+                        await api.disconnect_event.wait()
+                except TimeoutError:
+                    silent = self.hass.loop.time() - api.last_rx
+                    if silent < SILENCE_TIMEOUT:
+                        continue
+                    _LOGGER.warning(
+                        "%s: no data or keep-alive for %ds, dropping session",
+                        self.address,
+                        int(silent),
+                    )
+                else:
+                    _LOGGER.info("%s: session dropped by the link", self.address)
+                break
+        finally:
+            if self._api is api:
+                self._api = None
+            await api.disconnect()
+
+        lasted = self.hass.loop.time() - started
+        _LOGGER.debug("%s: session lasted %ds", self.address, int(lasted))
+        if lasted >= SESSION_STABLE_AFTER:
+            self._consecutive_failures = 0
+            async_delete_issue(self.hass, DOMAIN, "cannot_connect")
+        else:
+            # A session that dies quickly is as bad as one that never opened.
+            self._record_failure()
+        self.async_update_listeners()
+
+    def _record_failure(self) -> None:
+        """Count a failed or short-lived session and raise an issue if stuck."""
+        self.last_connection_successful = False
+        self._consecutive_failures += 1
+        _LOGGER.debug(
+            "%s: session failed (%d in a row), next attempt in %ds",
+            self.address,
+            self._consecutive_failures,
+            self._poll_interval(),
+        )
+        self.async_update_listeners()
+        if self._consecutive_failures >= ISSUE_AFTER_FAILURES:
             async_create_issue(
                 self.hass,
                 DOMAIN,
@@ -197,19 +228,6 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
                 translation_key="cannot_connect",
                 translation_placeholders={"address": self.address},
             )
-            raise UpdateFailed(f"Failed to connect to {self.address}: {err}") from err
-        except TimeoutError:
-            _LOGGER.debug(
-                "Max connection time reached for %s, disconnecting",
-                self.address,
-            )
-        finally:
-            # Always disconnect after reading; _needs_poll will reconnect on
-            # the next advertisement (rate-limited by _poll_interval).
-            self._api = None
-            await api.disconnect()
-
-        return self.data or {}
 
     @callback
     def _handle_push_data(self, data: dict[str, Any]) -> None:
@@ -218,7 +236,6 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
             self.data = {}
         self.data.update(data)
         self._ready_event.set()
-        self._data_received_event.set()
         self._set_device_info(self.data)
         self._sync_time(data)
         self.async_update_listeners()
@@ -301,6 +318,11 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
     ) -> None:
         """Handle the device going unavailable."""
         super()._async_handle_unavailable(service_info)
+        if self.connected:
+            # Many BLE peripherals stop advertising while connected; the
+            # session itself is the source of truth.
+            _LOGGER.debug("%s: no advertisements, but session is up", self.address)
+            return
         _LOGGER.info("Chandler Systems device %s is unavailable", self.address)
         if self._api is not None:
             # Schedule disconnect without blocking the event loop
@@ -324,6 +346,11 @@ class ChandlerSystemsCoordinator(ActiveBluetoothDataUpdateCoordinator[dict[str, 
 
     async def async_disconnect(self) -> None:
         """Disconnect from the device and clean up the API instance."""
+        if self._session_task is not None:
+            self._session_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._session_task
+            self._session_task = None
         if self._api is not None:
             await self._api.disconnect()
             self._api = None
